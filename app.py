@@ -11,7 +11,7 @@ st.set_page_config(page_title="CSV Chat Assistant", layout="wide")
 
 # Custom header
 st.markdown(
-    "<h1 style='text-align: center; color: #00ffcc;'>📊 AI CSV Chat Assistant</h1>",
+    "<h1 style='text-align: center; color: #00ffcc;'>🧠 Query Your CSV with Natural Language</h1>",
     unsafe_allow_html=True
 )
 st.caption("Upload a CSV file, ask questions in natural language, and visualize insights instantly.")

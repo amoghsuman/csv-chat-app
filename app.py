@@ -29,8 +29,9 @@ if uploaded_file:
         agent = create_pandas_dataframe_agent(
             llm,
             df,
-            verbose=False,
+            verbose=True,
             agent_type="zero-shot-react-description"  # Safe for public use
+            handle_parsing_errors=True
         )
 
         # Query box

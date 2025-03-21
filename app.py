@@ -3,7 +3,8 @@ import pandas as pd
 import plotly.express as px
 import os
 from langchain.llms import OpenAI
-from langchain_experimental.agents import create_pandas_dataframe_agent
+from langchain.chains import LLMChain
+from langchain.prompts import PromptTemplate
 
 # Set Streamlit config
 st.set_page_config(page_title="CSV Chat App", layout="wide")
@@ -19,21 +20,12 @@ if uploaded_file:
     st.subheader("📄 Data Preview")
     st.dataframe(df)
 
-    # OpenAI API Key Input
+    # OpenAI API Key Input (from Streamlit Secrets or Env Vars)
     api_key = os.getenv("OPENAI_API_KEY")
 
     if api_key:
         os.environ["OPENAI_API_KEY"] = api_key
         llm = OpenAI(temperature=0)
-
-        # Safer agent type (does not run code)
-        agent = create_pandas_dataframe_agent(
-            llm,
-            df,
-            verbose=True,
-            agent_type="zero-shot-react-description",  # Safe for public use
-            handle_parsing_errors=True
-        )
 
         # Query box
         st.subheader("💬 Ask a question")
@@ -42,7 +34,31 @@ if uploaded_file:
         if st.button("Get Answer") and question:
             try:
                 with st.spinner("Thinking..."):
-                    response = agent.run(question)
+
+                    # Prompt template for safe GPT querying
+                    prompt = PromptTemplate(
+                        input_variables=["question", "df_head", "columns"],
+                        template="""
+You are a data analyst. You are given a dataset with the following columns:
+{columns}
+
+Here are the first few rows of the dataset:
+{df_head}
+
+Answer the following question:
+{question}
+"""
+                    )
+
+                    chain = LLMChain(llm=llm, prompt=prompt)
+
+                    # Run GPT-based Q&A
+                    response = chain.run({
+                        "question": question,
+                        "df_head": df.head(5).to_string(),
+                        "columns": ", ".join(df.columns)
+                    })
+
                 st.success(response)
             except Exception as e:
                 st.error(f"Error: {e}")
@@ -59,3 +75,5 @@ if uploaded_file:
             else:
                 fig = px.scatter(df, x=x_axis, y=y_axis)
             st.plotly_chart(fig, use_container_width=True)
+    else:
+        st.warning("Please set the OpenAI API key in Streamlit secrets or environment.")

@@ -92,6 +92,6 @@ Answer the following question:
 # Footer
 st.markdown("---")
 st.markdown(
-    "<p style='text-align: center; color: grey;'>Made with ❤️ by Amogh Suman</p>",
+    "<p style='text-align: center; color: grey;'>Made with ❤️ by GT Bharat LLP</p>",
     unsafe_allow_html=True
 )

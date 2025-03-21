@@ -30,7 +30,7 @@ if uploaded_file:
             llm,
             df,
             verbose=True,
-            agent_type="zero-shot-react-description"  # Safe for public use
+            agent_type="zero-shot-react-description",  # Safe for public use
             handle_parsing_errors=True
         )
 

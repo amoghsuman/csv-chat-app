@@ -20,7 +20,8 @@ if uploaded_file:
     st.dataframe(df)
 
     # OpenAI API Key Input
-    api_key = st.text_input("Enter your OpenAI API key", type="password")
+    api_key = os.getenv("OPENAI_API_KEY")
+
     if api_key:
         os.environ["OPENAI_API_KEY"] = api_key
         llm = OpenAI(temperature=0)

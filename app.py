@@ -9,8 +9,10 @@ from langchain.prompts import PromptTemplate
 from langchain.agents.agent_types import AgentType
 from langchain_experimental.agents import create_pandas_dataframe_agent
 
+# Set up page layout
 st.set_page_config(page_title="CSV Chat Assistant", layout="wide")
 
+# Initialize session state variables
 if "chat_history" not in st.session_state:
     st.session_state["chat_history"] = []
 if "datasets" not in st.session_state:
@@ -21,15 +23,19 @@ if "suggested_questions" not in st.session_state:
 # ─────────────────────────────────────────
 # 🧠 App Title and Upload Area
 # ─────────────────────────────────────────
+
+# Display title and caption
 st.markdown(
     "<h3 style='text-align: center; color: #00ffcc;'>🧠 Talk To Your CSV in Natural Language</h3>",
     unsafe_allow_html=True
 )
 st.caption("Upload multiple CSVs, switch between them, and analyze each dataset seamlessly.")
 
+# Upload block for CSV files
 st.markdown("### 📤 Upload CSV(s)")
 uploaded_files = st.file_uploader("Upload one or more CSVs", type="csv", accept_multiple_files=True)
 
+# Process uploaded files
 for file in uploaded_files or []:
     if file.name not in [name for name, _ in st.session_state["datasets"]]:
         try:
@@ -39,16 +45,22 @@ for file in uploaded_files or []:
         except Exception as e:
             st.warning(f"Failed to read {file.name}: {e}")
 
+# Dataset selection dropdown
 dataset_names = [name for name, _ in st.session_state["datasets"]]
 selected_dataset_name = st.selectbox("📂 Select a Dataset", dataset_names) if dataset_names else None
 
 # Load OpenAI API Key
 api_key = st.secrets.get("OPENAI_API_KEY")
 
+# ─────────────────────────────────────────
+# 📄 Main Analysis Section
+# ─────────────────────────────────────────
+
 if selected_dataset_name:
+    # Get selected DataFrame
     df = next(df for name, df in st.session_state["datasets"] if name == selected_dataset_name)
 
-    # Sidebar – Plot Settings
+    # Sidebar for plotting controls
     with st.sidebar:
         st.markdown("---")
         st.subheader("📊 Plot Settings")
@@ -56,15 +68,16 @@ if selected_dataset_name:
         y_axis = st.selectbox("Y-axis", df.columns)
         color_axis = st.selectbox("Color (Optional)", ["None"] + list(df.columns))
 
-    # 📄 Data Preview
+    # Display dataset preview
     st.subheader(f"📄 Data Preview: `{selected_dataset_name}`")
     st.dataframe(df, use_container_width=True)
 
     if api_key:
+        # Set environment variable for OpenAI key
         os.environ["OPENAI_API_KEY"] = api_key
         llm = OpenAI(temperature=0)
 
-        # Initialize agent
+        # Initialize agent only once per dataset
         if "agent" not in st.session_state or st.session_state.get("current_dataset") != selected_dataset_name:
             st.session_state["current_dataset"] = selected_dataset_name
             with st.spinner(f"Initializing AI Agent for `{selected_dataset_name}`..."):
@@ -83,9 +96,13 @@ if selected_dataset_name:
 
         agent = st.session_state["agent"]
 
-        # 🧠 Summary
+        # ─────────────────────────────────────────
+        # 🧠 AI-Generated Summary Section
+        # ─────────────────────────────────────────
+
         st.markdown("### 🧠 Dataset Overview & Insights")
 
+        # Capture dataset info and value counts
         df_info = io.StringIO()
         df.info(buf=df_info)
         info_str = df_info.getvalue()
@@ -100,6 +117,7 @@ if selected_dataset_name:
             for col, counts in value_counts_dict.items()
         )
 
+        # Prompt to summarize the dataset
         summary_prompt = PromptTemplate(
             input_variables=["shape", "columns", "info", "describe", "value_counts"],
             template="""
@@ -128,9 +146,13 @@ Value counts: {value_counts}
 
         st.markdown(dataset_summary, unsafe_allow_html=True)
 
-        # 🔍 Suggested Questions
+        # ─────────────────────────────────────────
+        # 🤖 Suggested Questions Section
+        # ─────────────────────────────────────────
+
         st.markdown("### 🤖 AI-Suggested Questions")
 
+        # Generate 5 smart queries for the dataset
         question_prompt = PromptTemplate(
             input_variables=["columns"],
             template="""
@@ -142,22 +164,25 @@ Suggest 5 interesting questions a user might ask.
         )
         q_chain = LLMChain(llm=llm, prompt=question_prompt)
         raw_questions = q_chain.run({"columns": ", ".join(df.columns)}).split("\n")
+
+        # Clean and store questions in session
         cleaned_questions = [
             q.strip().lstrip("12345.:-•* ") for q in raw_questions if q.strip()
         ]
         st.session_state["suggested_questions"] = cleaned_questions
 
+        # Render question radio buttons
         selected_question = None
         if st.session_state["suggested_questions"]:
             selected_question = st.radio("Click a question to get an answer:", st.session_state["suggested_questions"])
-        else:
-            selected_question = None
 
+        # Button to run selected question through agent
         if st.button("Get AI Answer") and selected_question:
             with st.spinner("Thinking..."):
                 try:
                     raw_output = agent.run(selected_question)
 
+                    # Prompt for answer polishing
                     refine_prompt = PromptTemplate(
                         input_variables=["question", "raw_output"],
                         template="""
@@ -181,10 +206,14 @@ Final response format:
 
                     st.success(final_answer)
                     st.session_state["chat_history"].append((selected_question, final_answer))
+
                 except Exception as e:
                     st.error(f"Agent error: {e}")
 
-        # 💬 Manual Questions
+        # ─────────────────────────────────────────
+        # 💬 Free-form Question Section
+        # ─────────────────────────────────────────
+
         with st.expander("💬 Ask Questions About This Data", expanded=True):
             user_question = st.text_input("Ask your question here:")
             if st.button("Get Answer") and user_question:
@@ -218,22 +247,30 @@ Final response format:
                     except Exception as e:
                         st.error(f"Agent error: {e}")
 
+        # ─────────────────────────────────────────
         # 📝 Chat History
+        # ─────────────────────────────────────────
+
         st.markdown("### 📝 Chat History")
         if st.session_state["chat_history"]:
             for q, a in st.session_state["chat_history"]:
                 st.markdown(f"**🧠 You:** {q}")
                 st.markdown(f"**🤖 Assistant:** {a}")
                 st.markdown("---")
+
             if st.button("🧹 Clear Chat History"):
                 st.session_state["chat_history"] = []
         else:
             st.info("Ask a question to start the conversation.")
 
     else:
+        # Missing API key
         st.warning("🔐 Please add your OpenAI API key in Streamlit Cloud secrets.")
 
-    # 📊 Scatter Plot
+    # ─────────────────────────────────────────
+    # 📊 Scatter Plot Visualization
+    # ─────────────────────────────────────────
+
     with st.expander("📊 Visualize with Scatter Plot", expanded=False):
         if x_axis and y_axis:
             if st.button("Plot"):
@@ -248,9 +285,10 @@ Final response format:
                 except Exception as e:
                     st.error(f"Plotting error: {e}")
 else:
+    # Show info when no CSV is uploaded yet
     st.info("📁 Upload one or more CSV files to begin.")
 
-# Footer
+# Footer credits
 st.markdown("---")
 st.markdown(
     "<p style='text-align: center; color: grey;'>Made with ❤️ by GT Bharat LLP</p>",

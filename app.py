@@ -2,92 +2,260 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 import os
+import io
 from langchain.llms import OpenAI
 from langchain.chains import LLMChain
 from langchain.prompts import PromptTemplate
+from langchain.agents.agent_types import AgentType
+from langchain_experimental.agents import create_pandas_dataframe_agent
 
-# Page configuration
 st.set_page_config(page_title="CSV Chat Assistant", layout="wide")
 
-# Custom header
+if "chat_history" not in st.session_state:
+    st.session_state["chat_history"] = []
+if "datasets" not in st.session_state:
+    st.session_state["datasets"] = []
+if "suggested_questions" not in st.session_state:
+    st.session_state["suggested_questions"] = []
+
+# Header
 st.markdown(
     "<h1 style='text-align: center; color: #00ffcc;'>🧠 Query Your CSV with Natural Language</h1>",
     unsafe_allow_html=True
 )
-st.caption("Upload a CSV file, ask questions in natural language, and visualize insights instantly.")
+st.caption("Upload multiple CSVs, switch between them, and analyze each dataset seamlessly.")
 
-# File uploader
-uploaded_file = st.file_uploader("📁 Upload your CSV file", type=["csv"])
-df = None
+# Sidebar – File Upload
+with st.sidebar:
+    st.header("⚙️ Upload CSV(s)")
+    uploaded_files = st.file_uploader("Upload one or more CSVs", type="csv", accept_multiple_files=True)
 
-if uploaded_file:
-    df = pd.read_csv(uploaded_file)
+    for file in uploaded_files or []:
+        if file.name not in [name for name, _ in st.session_state["datasets"]]:
+            try:
+                file.seek(0)
+                df = pd.read_csv(file)
+                st.session_state["datasets"].append((file.name, df))
+            except Exception as e:
+                st.warning(f"Failed to read {file.name}: {e}")
 
-    # Data Preview
-    with st.container():
-        st.subheader("📄 Data Preview")
-        st.dataframe(df, use_container_width=True)
+    dataset_names = [name for name, _ in st.session_state["datasets"]]
+    selected_dataset_name = st.selectbox("📂 Select a Dataset", dataset_names) if dataset_names else None
 
-    # Get API key from environment (set in Streamlit Cloud Secrets)
-    api_key = os.getenv("OPENAI_API_KEY")
+# Load OpenAI API Key from secrets
+api_key = st.secrets.get("OPENAI_API_KEY")
+
+# ─────────────────────────────────────────
+# 📄 MAIN AREA
+# ─────────────────────────────────────────
+if selected_dataset_name:
+    df = next(df for name, df in st.session_state["datasets"] if name == selected_dataset_name)
+
+    # Sidebar – Plot Settings
+    with st.sidebar:
+        st.markdown("---")
+        st.subheader("📊 Plot Settings")
+        x_axis = st.selectbox("X-axis", df.columns)
+        y_axis = st.selectbox("Y-axis", df.columns)
+        color_axis = st.selectbox("Color (Optional)", ["None"] + list(df.columns))
+
+    # 📄 Data Preview
+    st.subheader(f"📄 Data Preview: `{selected_dataset_name}`")
+    st.dataframe(df, use_container_width=True)
 
     if api_key:
         os.environ["OPENAI_API_KEY"] = api_key
         llm = OpenAI(temperature=0)
 
-        # Question-answer section
-        with st.expander("💬 Ask Questions About This Data", expanded=True):
-            question = st.text_input("Type your question here")
-
-            if st.button("Get Answer") and question:
+        # ✅ Initialize Agent once per dataset
+        if "agent" not in st.session_state or st.session_state.get("current_dataset") != selected_dataset_name:
+            st.session_state["current_dataset"] = selected_dataset_name
+            with st.spinner(f"Initializing AI Agent for `{selected_dataset_name}`..."):
                 try:
-                    with st.spinner("Thinking..."):
+                    st.session_state["agent"] = create_pandas_dataframe_agent(
+                        llm=llm,
+                        df=df,
+                        agent_type=AgentType.ZERO_SHOT_REACT_DESCRIPTION,
+                        verbose=True,
+                        handle_parsing_errors=True,
+                        allow_dangerous_code=True
+                    )
+                    st.success(f"✅ AI Agent is ready for `{selected_dataset_name}`!")
+                except Exception as e:
+                    st.error(f"❌ Failed to initialize AI Agent: {e}")
 
-                        # Prompt template
-                        prompt = PromptTemplate(
-                            input_variables=["question", "df_head", "columns"],
-                            template="""
-You are a data analyst. You are given a dataset with the following columns:
+        agent = st.session_state["agent"]
+
+        # 🧠 AI-GENERATED SUMMARY
+        st.markdown("### 🧠 Dataset Overview & Insights")
+
+        df_info = io.StringIO()
+        df.info(buf=df_info)
+        info_str = df_info.getvalue()
+
+        value_counts_dict = {
+            col: df[col].value_counts().head(2).to_dict()
+            for col in df.select_dtypes(include='object').columns
+        }
+
+        value_counts_str = "\n".join(
+            f"{col}: {', '.join([f'{k} ({v})' for k, v in counts.items()])}"
+            for col, counts in value_counts_dict.items()
+        )
+
+        summary_prompt = PromptTemplate(
+            input_variables=["shape", "columns", "info", "describe", "value_counts"],
+            template="""
+You are a data analyst. Given the following dataset info, generate a clear and concise summary in markdown format using the following structure:
+
+**🧾 Overview:** 1–2 lines about the data  
+**🔍 Key Insights:** 3–5 bullet points highlighting trends or distributions  
+**📌 Notable Stats:** 2–3 bullet points covering variance, skew, or standout numerical stats
+
+Dataset shape: {shape}
+Column names: {columns}
+Info: {info}
+Describe: {describe}
+Value counts: {value_counts}
+"""
+        )
+
+        summary_chain = LLMChain(llm=llm, prompt=summary_prompt)
+        dataset_summary = summary_chain.run({
+            "shape": str(df.shape),
+            "columns": ", ".join(df.columns),
+            "info": info_str,
+            "describe": df.describe().to_string(),
+            "value_counts": value_counts_str
+        })
+
+        st.markdown(dataset_summary, unsafe_allow_html=True)
+
+        # 🔍 AI-Suggested Questions
+        st.markdown("### 🤖 AI-Suggested Questions")
+
+        question_prompt = PromptTemplate(
+            input_variables=["columns"],
+            template="""
+You are a data scientist. Given the dataset with the following columns:
 {columns}
 
-Here are the first few rows of the dataset:
-{df_head}
+Suggest 5 interesting questions a user might ask.
+"""
+        )
+        q_chain = LLMChain(llm=llm, prompt=question_prompt)
+        raw_questions = q_chain.run({"columns": ", ".join(df.columns)}).split("\n")
+        cleaned_questions = [
+            q.strip().lstrip("12345.:-•* ") for q in raw_questions if q.strip()
+        ]
+        st.session_state["suggested_questions"] = cleaned_questions
 
-Answer the following question:
-{question}
+        selected_question = None
+        if st.session_state["suggested_questions"]:
+            selected_question = st.radio("Click a question to get an answer:", st.session_state["suggested_questions"])
+        else:
+            selected_question = None
+
+        if st.button("Get AI Answer") and selected_question:
+            with st.spinner("Thinking..."):
+                try:
+                    raw_output = agent.run(selected_question)
+
+                    refine_prompt = PromptTemplate(
+                        input_variables=["question", "raw_output"],
+                        template="""
+You are a helpful data analyst assistant. Summarize the answer to the question below in a concise, quantified, and markdown-friendly way.
+
+**Question:** {question}  
+**Agent Raw Output:** {raw_output}  
+
+Final response format:
+- Quantified values wherever applicable
+- Reasoning used
+- 4–6 lines max
+- Markdown-friendly format
+"""
+                    )
+                    refine_chain = LLMChain(llm=llm, prompt=refine_prompt)
+                    final_answer = refine_chain.run({
+                        "question": selected_question,
+                        "raw_output": raw_output
+                    })
+
+                    st.success(final_answer)
+                    st.session_state["chat_history"].append((selected_question, final_answer))
+
+                except Exception as e:
+                    st.error(f"Agent error: {e}")
+
+        # 💬 Manual Q&A
+        with st.expander("💬 Ask Questions About This Data", expanded=True):
+            user_question = st.text_input("Ask your question here:")
+            if st.button("Get Answer") and user_question:
+                with st.spinner("Thinking..."):
+                    try:
+                        raw_output = agent.run(user_question)
+
+                        refine_prompt = PromptTemplate(
+                            input_variables=["question", "raw_output"],
+                            template="""
+You are a helpful data analyst assistant. Summarize the answer to the question below in a concise, quantified, and markdown-friendly way.
+
+**Question:** {question}  
+**Agent Raw Output:** {raw_output}  
+
+Final response format:
+- Quantified values wherever applicable
+- Reasoning used
+- 4–6 lines max
+- Markdown-friendly format
 """
                         )
-
-                        chain = LLMChain(llm=llm, prompt=prompt)
-
-                        response = chain.run({
-                            "question": question,
-                            "df_head": df.head(5).to_string(),
-                            "columns": ", ".join(df.columns)
+                        refine_chain = LLMChain(llm=llm, prompt=refine_prompt)
+                        final_answer = refine_chain.run({
+                            "question": user_question,
+                            "raw_output": raw_output
                         })
 
-                    st.success(response)
-                except Exception as e:
-                    st.error(f"Error: {e}")
+                        st.success(final_answer)
+                        st.session_state["chat_history"].append((user_question, final_answer))
 
-        # Scatter Plot
-        with st.expander("📊 Visualize with Scatter Plot", expanded=False):
-            col1, col2, col3 = st.columns(3)
-            x_axis = col1.selectbox("X-axis", df.columns)
-            y_axis = col2.selectbox("Y-axis", df.columns)
-            color_axis = col3.selectbox("Color (Optional)", ["None"] + list(df.columns))
+                    except Exception as e:
+                        st.error(f"Agent error: {e}")
 
+        # 📝 Chat History
+        st.markdown("### 📝 Chat History")
+        if st.session_state["chat_history"]:
+            for q, a in st.session_state["chat_history"]:
+                st.markdown(f"**🧠 You:** {q}")
+                st.markdown(f"**🤖 Assistant:** {a}")
+                st.markdown("---")
+
+            if st.button("🧹 Clear Chat History"):
+                st.session_state["chat_history"] = []
+        else:
+            st.info("Ask a question to start the conversation.")
+
+    else:
+        st.warning("🔐 Please add your OpenAI API key in Streamlit Cloud secrets.")
+
+    # 📊 Scatter Plot
+    with st.expander("📊 Visualize with Scatter Plot", expanded=False):
+        if x_axis and y_axis:
             if st.button("Plot"):
                 try:
-                    if color_axis != "None":
-                        fig = px.scatter(df, x=x_axis, y=y_axis, color=color_axis)
-                    else:
-                        fig = px.scatter(df, x=x_axis, y=y_axis)
+                    fig = px.scatter(
+                        df,
+                        x=x_axis,
+                        y=y_axis,
+                        color=color_axis if color_axis != "None" else None
+                    )
                     st.plotly_chart(fig, use_container_width=True)
                 except Exception as e:
                     st.error(f"Plotting error: {e}")
-    else:
-        st.warning("🔐 Please set the OpenAI API key in Streamlit Secrets.")
+
+else:
+    st.info("📁 Upload one or more CSV files to begin.")
 
 # Footer
 st.markdown("---")

@@ -18,36 +18,33 @@ if "datasets" not in st.session_state:
 if "suggested_questions" not in st.session_state:
     st.session_state["suggested_questions"] = []
 
-# Header
+# ─────────────────────────────────────────
+# 🧠 App Title and Upload Area
+# ─────────────────────────────────────────
 st.markdown(
     "<h1 style='text-align: center; color: #00ffcc;'>🧠 Query Your CSV with Natural Language</h1>",
     unsafe_allow_html=True
 )
 st.caption("Upload multiple CSVs, switch between them, and analyze each dataset seamlessly.")
 
-# Sidebar – File Upload
-with st.sidebar:
-    st.header("⚙️ Upload CSV(s)")
-    uploaded_files = st.file_uploader("Upload one or more CSVs", type="csv", accept_multiple_files=True)
+st.markdown("### 📤 Upload CSV(s)")
+uploaded_files = st.file_uploader("Upload one or more CSVs", type="csv", accept_multiple_files=True)
 
-    for file in uploaded_files or []:
-        if file.name not in [name for name, _ in st.session_state["datasets"]]:
-            try:
-                file.seek(0)
-                df = pd.read_csv(file)
-                st.session_state["datasets"].append((file.name, df))
-            except Exception as e:
-                st.warning(f"Failed to read {file.name}: {e}")
+for file in uploaded_files or []:
+    if file.name not in [name for name, _ in st.session_state["datasets"]]:
+        try:
+            file.seek(0)
+            df = pd.read_csv(file)
+            st.session_state["datasets"].append((file.name, df))
+        except Exception as e:
+            st.warning(f"Failed to read {file.name}: {e}")
 
-    dataset_names = [name for name, _ in st.session_state["datasets"]]
-    selected_dataset_name = st.selectbox("📂 Select a Dataset", dataset_names) if dataset_names else None
+dataset_names = [name for name, _ in st.session_state["datasets"]]
+selected_dataset_name = st.selectbox("📂 Select a Dataset", dataset_names) if dataset_names else None
 
-# Load OpenAI API Key from secrets
+# Load OpenAI API Key
 api_key = st.secrets.get("OPENAI_API_KEY")
 
-# ─────────────────────────────────────────
-# 📄 MAIN AREA
-# ─────────────────────────────────────────
 if selected_dataset_name:
     df = next(df for name, df in st.session_state["datasets"] if name == selected_dataset_name)
 
@@ -67,7 +64,7 @@ if selected_dataset_name:
         os.environ["OPENAI_API_KEY"] = api_key
         llm = OpenAI(temperature=0)
 
-        # ✅ Initialize Agent once per dataset
+        # Initialize agent
         if "agent" not in st.session_state or st.session_state.get("current_dataset") != selected_dataset_name:
             st.session_state["current_dataset"] = selected_dataset_name
             with st.spinner(f"Initializing AI Agent for `{selected_dataset_name}`..."):
@@ -80,13 +77,13 @@ if selected_dataset_name:
                         handle_parsing_errors=True,
                         allow_dangerous_code=True
                     )
-                    st.success(f"✅ AI Agent is ready for `{selected_dataset_name}`!")
+                    st.success("✅ AI Agent initialized!")
                 except Exception as e:
                     st.error(f"❌ Failed to initialize AI Agent: {e}")
 
         agent = st.session_state["agent"]
 
-        # 🧠 AI-GENERATED SUMMARY
+        # 🧠 Summary
         st.markdown("### 🧠 Dataset Overview & Insights")
 
         df_info = io.StringIO()
@@ -131,7 +128,7 @@ Value counts: {value_counts}
 
         st.markdown(dataset_summary, unsafe_allow_html=True)
 
-        # 🔍 AI-Suggested Questions
+        # 🔍 Suggested Questions
         st.markdown("### 🤖 AI-Suggested Questions")
 
         question_prompt = PromptTemplate(
@@ -184,11 +181,10 @@ Final response format:
 
                     st.success(final_answer)
                     st.session_state["chat_history"].append((selected_question, final_answer))
-
                 except Exception as e:
                     st.error(f"Agent error: {e}")
 
-        # 💬 Manual Q&A
+        # 💬 Manual Questions
         with st.expander("💬 Ask Questions About This Data", expanded=True):
             user_question = st.text_input("Ask your question here:")
             if st.button("Get Answer") and user_question:
@@ -219,7 +215,6 @@ Final response format:
 
                         st.success(final_answer)
                         st.session_state["chat_history"].append((user_question, final_answer))
-
                     except Exception as e:
                         st.error(f"Agent error: {e}")
 
@@ -230,7 +225,6 @@ Final response format:
                 st.markdown(f"**🧠 You:** {q}")
                 st.markdown(f"**🤖 Assistant:** {a}")
                 st.markdown("---")
-
             if st.button("🧹 Clear Chat History"):
                 st.session_state["chat_history"] = []
         else:
@@ -253,7 +247,6 @@ Final response format:
                     st.plotly_chart(fig, use_container_width=True)
                 except Exception as e:
                     st.error(f"Plotting error: {e}")
-
 else:
     st.info("📁 Upload one or more CSV files to begin.")
 

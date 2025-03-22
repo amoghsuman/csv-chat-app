@@ -22,7 +22,7 @@ if "suggested_questions" not in st.session_state:
 # 🧠 App Title and Upload Area
 # ─────────────────────────────────────────
 st.markdown(
-    "<h2 style='text-align: center; color: #00ffcc;'>🧠 Talk and Query Your CSV with Natural Language</h2>",
+    "<h2 style='text-align: center; color: #00ffcc;'>🧠 Talk To Your CSV in Natural Language</h2>",
     unsafe_allow_html=True
 )
 st.caption("Upload multiple CSVs, switch between them, and analyze each dataset seamlessly.")

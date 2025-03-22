@@ -103,7 +103,7 @@ if selected_dataset_name:
         summary_prompt = PromptTemplate(
             input_variables=["shape", "columns", "info", "describe", "value_counts"],
             template="""
-You are a data analyst. Given the following dataset info, generate a clear and concise summary in markdown format using the following structure:
+You are a data scientist. Given the following dataset info, generate a clear and concise summary in markdown format using the following structure:
 
 **🧾 Overview:** 1–2 lines about the data  
 **🔍 Key Insights:** 3–5 bullet points highlighting trends or distributions  

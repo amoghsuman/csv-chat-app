@@ -11,7 +11,7 @@ Upload a CSV, ask natural language questions, and visualize relationships via sc
 
 ## 🚀 Try it Live
 
-[Streamlit App URL](https://yourusername.streamlit.app)
+[Streamlit App URL](https://csv-chat-app.streamlit.app/)
 
 ## 🧠 Powered By
 
